@@ -7,7 +7,7 @@ description = "A flexible and simple task pool for asynchronous execution"
 repository = "https://github.com/ZivoMartin/AsyncForge/tree/main/task_forge"
 homepage = "https://github.com/ZivoMartin/AsyncForge/tree/main/task_forge"
 readme = "README.md"
-keywords = ["async", "task pool", "executor", "tokio", "concurrency"]
+keywords = ["async", "pool", "executor", "tokio", "concurrency"]
 categories = ["asynchronous", "concurrency", "data-structures"]
 
 [dependencies]
