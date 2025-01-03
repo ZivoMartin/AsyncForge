@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "task_pool",
+    #"net_heart",
+    #"net_pulse",
+    "sync_tools"
+]
+resolver = "2"

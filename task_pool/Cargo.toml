@@ -1,0 +1,11 @@
+[package]
+name = "task_pool"
+version = "0.1.0"
+edition = "2021"
+description = "Asynchronous task pool"
+license = "MIT/Apache-2.0"
+
+[dependencies]
+thiserror = "2.0.9"
+tokio = "1.42.0"
+sync_tools = { path="../sync_tools" }
