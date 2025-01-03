@@ -31,7 +31,7 @@ A flexible and asynchronous task forge for concurrent task execution in Rust. `T
 To add `task_forge` to your project, include the following in your `Cargo.toml`:
 ```toml
 [dependencies]
-task_forge = "0.1.0"  # Replace with the latest version
+task_forge = "0.1.1"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -44,7 +44,7 @@ tokio = { version = "1", features = ["full"] }
 Below is a simple example using the `TaskForge` to create and run a basic task:
 
 ```rust
-use task_forge::{TaskForge, TaskTrait, channel};
+use task_forge::{task::TaskInterface, Sender, channel, TaskForge, TaskTrait};
 
 struct EchoTask;
 
@@ -68,7 +68,7 @@ async fn main() {
     let (task_forge, _) = TaskForge::<String, String>::new();
 
     let task_id = 1;
-    task_forge.new_task::<EchoTask, _>(task_id, "Hello".to_string()).await.unwrap();
+    task_forgenew_task::<EchoTask, _>(task_id, "Hello".to_string()).await.unwrap();
     task_forge.send(task_id, "Hello again!".to_string()).await.unwrap();
 
     let mut result_receiver = task_forge.new_result_redirection().await;
@@ -143,5 +143,4 @@ For more details on API usage, visit the docs.rs page
 
 ## **Licence**
 
-This project is licensed under the MIT License.
-Let me know if you’d like any changes or additions!
+This project is licensed under the MIT License. Let me know if you’d like any changes or additions!
