@@ -42,9 +42,10 @@ tokio = { version = "1", features = ["full"] }
 # Basic Example
 
 Below is a simple example using the `TaskForge` to create and run a basic task:
-use task_forge::{TaskForge, TaskTrait, channel};
 
 ```rust
+use task_forge::{TaskForge, TaskTrait, channel};
+
 struct EchoTask;
 
 impl TaskTrait<String, String, String> for EchoTask {
@@ -123,9 +124,10 @@ for i in 0..5 {
 ## **Error Handling**
 
 `task_forge` provides several built-in error handling mechanisms:
-    - `panic_error_handler`: Panics when an error occurs
-    - `log_error_handler`: Logs the errors
-    - `ignore_error_handler`: Silently ignores all errors
+- `panic_error_handler`: Panics when an error occurs
+- `log_error_handler`: Logs the errors
+- `ignore_error_handler`: Silently ignores all errors
+    
 To use a custom error handler, pass the appropriate receiver when creating the forge:
 ```rust
 use task_forge::log_error_handler;
@@ -133,7 +135,7 @@ use task_forge::log_error_handler;
 let (task_forge, error_receiver) = TaskForge::new();
 log_error_handler(error_receiver);
 ```
-You can also create your own error handler by using tje error receiver.
+You can also create your own error handler by using the error receiver.
 
 ## **Documentation**
 

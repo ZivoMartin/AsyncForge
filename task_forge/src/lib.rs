@@ -11,8 +11,7 @@ pub mod task_forge;
 
 pub use task::TaskTrait;
 pub use task_forge::{OpId, TaskForge};
-use tokio::sync::mpsc::channel;
-pub use tokio::sync::mpsc::{Receiver, Sender};
+pub use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub type Channel<T> = (Sender<T>, Receiver<T>);
 pub fn new_channel<T: Send>() -> Channel<T> {
