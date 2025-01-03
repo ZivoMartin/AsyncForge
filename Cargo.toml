@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "task_pool",
+    "task_forge",
     #"net_heart",
     #"net_pulse",
     "sync_tools"

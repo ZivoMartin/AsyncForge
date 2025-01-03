@@ -2,6 +2,6 @@ mod macros;
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
-pub type Wrapped<T> = Arc<Mutex<T>>;
+pub type Wrapped<T> = Arc<RwLock<T>>;

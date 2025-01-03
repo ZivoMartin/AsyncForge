@@ -4,7 +4,7 @@ use thiserror::Error;
 use tracing::error;
 
 #[derive(Debug, Error)]
-pub enum PoolError {
+pub enum ForgeError {
     #[error("Failed to send message to task {0}")]
     SendError(OpId),
 
@@ -32,12 +32,12 @@ pub enum PoolError {
     #[error("Task {0} doesn't exist")]
     TaskNotExist(OpId),
 
-    #[error("Task {0} failed to give its output to the pool")]
+    #[error("Task {0} failed to give its output to the forge")]
     FailedToOutput(OpId),
 }
 
-pub type ErrorReceiver = Receiver<PoolError>;
-pub type PoolResult<T> = Result<T, PoolError>;
+pub type ErrorReceiver = Receiver<ForgeError>;
+pub type ForgeResult<T> = Result<T, ForgeError>;
 
 /// This function is a default error handler, simply panic if receiving a message
 pub fn panic_error_handler(mut error_receiver: ErrorReceiver) {
@@ -52,7 +52,7 @@ pub fn panic_error_handler(mut error_receiver: ErrorReceiver) {
 pub fn log_error_handler(mut error_receiver: ErrorReceiver) {
     tokio::spawn(async move {
         while let Some(e) = error_receiver.recv().await {
-            error!("Task pool error: {:?}", e);
+            error!("Task forge error: {:?}", e);
         }
     });
 }

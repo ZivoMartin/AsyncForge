@@ -1,6 +1,6 @@
 use crate::{
-    errors::{PoolError, PoolResult},
-    task_pool::OpId,
+    errors::{ForgeError, ForgeResult},
+    task_forge::OpId,
     Sender,
 };
 
@@ -19,16 +19,16 @@ impl<Output> TaskInterface<Output> {
     }
 
     /// Send the output to the pool via a channel, returns an error if the sender fail to handle the message
-    pub async fn output(&self, output: Output) -> PoolResult<()> {
+    pub async fn output(&self, output: Output) -> ForgeResult<()> {
         if self.output_sender.send((self.id, output)).await.is_err() {
-            Err(PoolError::FailedToOutput(self.id))
+            Err(ForgeError::FailedToOutput(self.id))
         } else {
             Ok(())
         }
     }
 }
 
-/// To use a task pool you should implement this trait to your tasks.
+/// To use a task forge you should implement this trait to your tasks.
 pub trait TaskTrait<Arg, Message, Output> {
     /// The begin method takes in parameter an arg of any type that you can pass to your task, and the task interface
     fn begin(arg: Arg, output_sender: TaskInterface<Output>) -> Sender<Message>;
