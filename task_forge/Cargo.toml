@@ -1,16 +1,16 @@
 [package]
-name = "asyncforge"
+name = "task_forge"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "A flexible and simple task pool for asynchronous execution"
-repository = "https://github.com/ZivoMartin/AsyncForge"
-homepage = "https://github.com/username/AsyncForge"
-# documentation = "https://docs.rs/asyncforge"
+repository = "https://github.com/ZivoMartin/AsyncForge/tree/main/task_forge"
+homepage = "https://github.com/ZivoMartin/AsyncForge/tree/main/task_forge"
 readme = "README.md"
+keywords = ["async", "task pool", "forge", "task", "pool", "executor", "tokio", "concurrency"]
+categories = ["asynchronous", "concurrency", "data-structures"]
 
 [dependencies]
 thiserror = "2.0.9"
-tokio = "1.42.0"
-sync_tools = { path="../sync_tools" }
+tokio = { version = "1.37.0", features = ["full"] }
 tracing = "0.1.41"

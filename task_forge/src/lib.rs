@@ -1,4 +1,4 @@
-//! # Your Crate
+//! # Task Forge
 //! A simple and flexible task forge for asynchronous task execution in Rust.
 //! This library provides a `TaskForge` to manage concurrent tasks efficiently.
 

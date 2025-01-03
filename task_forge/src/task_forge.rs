@@ -7,8 +7,10 @@ use crate::{
 };
 use std::marker::Send;
 use std::{collections::HashMap, sync::Arc};
-use sync_tools::{wrap, Wrapped};
+use tokio::sync::RwLock;
 use tracing::error;
+
+type Wrapped<T> = Arc<RwLock<T>>;
 
 pub type OpId = u64;
 
@@ -41,14 +43,14 @@ struct WrappedTaskForge<Message: Send, Output: Send> {
 impl<Message: Send + 'static, Output: Send + 'static + Sync> WrappedTaskForge<Message, Output> {
     fn new(error_sender: Sender<ForgeError>) -> Wrapped<Self> {
         let (end_task_sender, receiver) = channel(100);
-        let forge = wrap!(WrappedTaskForge {
+        let forge = Arc::new(RwLock::new(WrappedTaskForge {
             forge: HashMap::new(),
             end_task_sender,
             output_result_senders: Vec::new(),
             task_creation_senders: HashMap::new(),
             task_states: HashMap::new(),
             cleaning_notifier: None,
-        });
+        }));
         Self::listen_for_ending_task(forge.clone(), receiver, error_sender);
         forge
     }
