@@ -78,12 +78,19 @@ async fn main() {
 
 # Waiting for Task Creation
 
-You can ensure that a task is fully created before sending a message using wait_for_task_creation:
+You can ensure that a task is fully created before sending a message using `wait_for_task_creation`:
 ```rust
 let task_id = 42;
 tokio::spawn(async move {
     task_forge.wait_for_task_creation(task_id).await.unwrap();
     task_forge.send(task_id, "Message after creation".to_string()).await.unwrap();
+});
+```
+Or you can use `wait_and_send` which does the same work:
+```rust
+let task_id = 42;
+tokio::spawn(async move {
+    task_forge.wait_and_send(task_id, "Message after creation".to_string()).await.unwrap();
 });
 ```
 
