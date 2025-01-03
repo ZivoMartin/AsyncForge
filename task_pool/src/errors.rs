@@ -48,6 +48,7 @@ pub fn panic_error_handler(mut error_receiver: ErrorReceiver) {
     });
 }
 
+/// This function is a default error handler, simply logs all errors
 pub fn log_error_handler(mut error_receiver: ErrorReceiver) {
     tokio::spawn(async move {
         while let Some(e) = error_receiver.recv().await {

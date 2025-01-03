@@ -1,9 +1,13 @@
 [package]
-name = "task_pool"
+name = "asyncforge"
 version = "0.1.0"
 edition = "2021"
-description = "Asynchronous task pool"
-license = "MIT/Apache-2.0"
+license = "MIT"
+description = "A flexible and simple task pool for asynchronous execution"
+repository = "https://github.com/ZivoMartin/AsyncForge"
+homepage = "https://github.com/username/AsyncForge"
+# documentation = "https://docs.rs/asyncforge"
+readme = "README.md"
 
 [dependencies]
 thiserror = "2.0.9"

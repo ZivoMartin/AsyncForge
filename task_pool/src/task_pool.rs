@@ -18,7 +18,8 @@ enum TaskState {
     Closed,
 }
 
-/// This struct contains the output of a task, it contains the output itself, the id of the task that have output and a boolean, true if the outputing cleared the pool false otherwise
+/// This struct represents the result of a completed task. It contains the output, the task ID, and a boolean indicating whether the output cleared the pool (true) or not (false).
+#[derive(Clone)]
 pub struct PoolTaskEnded<Output: Send> {
     pub output: Arc<Output>,
     pub id: OpId,
@@ -65,8 +66,8 @@ impl<Message: Send + 'static, Output: Send + 'static + Sync> WrappedTaskPool<Mes
         }
     }
 
-    /// This function takes an id and remove it from the pool. If the pool is in cleaning stage, then the task is totally removed, otherwise his state will pass in Closed
-    /// This function may fail if the task is already over, or if the pool is in cleaning stage with a uninitilised or closed cleaning notifier
+    /// Removes a task from the pool based on its ID. If the pool is in the cleaning stage, the task is fully removed; otherwise, its state is set to "Closed".
+    /// This function may fail if the task has already ended or if the cleaning notifier is uninitialized or closed.
     async fn handle_ending_task(&mut self, ending_task: OpId) -> PoolResult<bool> {
         if self.task_states.get(&ending_task) != Some(&TaskState::Running) {
             return Err(PoolError::TaskClosed(ending_task));
@@ -86,8 +87,9 @@ impl<Message: Send + 'static, Output: Send + 'static + Sync> WrappedTaskPool<Mes
         Ok(should_clear)
     }
 
-    /// This function is the main loop of the pool, all the endings tasks are received here. If the gestion of an ending task failed, then the erreor is given via the error_sender. If error_sender
-    /// isn't valid, then the function simply ignore the errors.
+    /// This function represents the main loop of the pool where all completed tasks are handled.
+    /// If handling a task fails, the error is sent through the `error_sender`. If `error_sender`
+    /// is not valid, the function log the errors.
     fn listen_for_ending_task(
         pool: Wrapped<Self>,
         mut receiver: Receiver<(OpId, Output)>,
@@ -273,7 +275,10 @@ impl<Message: Send + 'static, Output: Send + 'static + Sync> TaskPool<Message, O
         )
     }
 
-    /// This function creates a new task and inserts it into the pool. This task must implement the TaskTrait which allows the pool to start it with a generic argument via the begin function of the TaskTrait. The function may fail if the task is already running, but will not fail if the task was running but is now closed. If the creation of the task identifier was expected by a task_creation_waiter, a notification is sent to the latter. The function returns an error if one of the sender is invalid.
+    /// Creates a new task and adds it to the pool. The task must implement `TaskTrait`, allowing the pool to start it with a generic argument via the `begin` function.
+    /// This function may fail if the task is already running, but not if the task was previously running and is now closed.
+    /// If a `task_creation_waiter` is waiting for the task ID, a notification is sent.
+    /// Returns an error if one of the senders is invalid.
     pub async fn new_task<Task: TaskTrait<TaskArg, Message, Output>, TaskArg>(
         &self,
         id: OpId,
@@ -301,7 +306,8 @@ impl<Message: Send + 'static, Output: Send + 'static + Sync> TaskPool<Message, O
         self.pool.read().await.is_empty()
     }
 
-    /// This function waits the creation of a task and send it the generic message passed in argument. The function fail if the waiting fails, or if for some reason the communication between thread fail.
+    /// Waits for a task to be created and sends a message to it.
+    /// Fails if the wait fails or if inter-thread communication encounters an error.
     pub async fn wait_and_send(&self, id: OpId, msg: Message) -> PoolResult<()> {
         WrappedTaskPool::wait_and_send(&self.pool, id, msg).await
     }
