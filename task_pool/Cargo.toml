@@ -9,3 +9,4 @@ license = "MIT/Apache-2.0"
 thiserror = "2.0.9"
 tokio = "1.42.0"
 sync_tools = { path="../sync_tools" }
+tracing = "0.1.41"

@@ -1,47 +1,16 @@
-use crate::task::TaskTrait;
-use std::collections::HashMap;
+use crate::{
+    channel,
+    errors::ErrorReceiver,
+    errors::{panic_error_handler, PoolError, PoolResult},
+    task::{TaskInterface, TaskTrait},
+    Receiver, Sender,
+};
 use std::marker::Send;
+use std::{collections::HashMap, sync::Arc};
 use sync_tools::{wrap, Wrapped};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-
-use thiserror::Error;
+use tracing::error;
 
 pub type OpId = u64;
-
-#[derive(Debug, Error)]
-pub enum PoolError {
-    #[error("Failed to send message to process {0}")]
-    SendError(OpId),
-
-    #[error("Failed to receive message")]
-    ReceiveError,
-
-    #[error("Task {0} is already closed")]
-    TaskClosed(OpId),
-
-    #[error("Task {0} creation failed")]
-    TaskCreationError(OpId),
-
-    #[error("Cleaning notifier error")]
-    CleaningNotifierError,
-
-    #[error("Task {0} already exists and is running")]
-    TaskAlreadyExists(OpId),
-
-    #[error("Task {0} creation sending failed")]
-    TaskCreationSendingError(OpId),
-
-    #[error("Failed to wait creation of process {0}")]
-    FailedToWaitCreation(OpId),
-
-    #[error("Task {0} doesn't exist")]
-    TaskNotExist(OpId),
-
-    #[error("The process pool is fully dropped")]
-    End,
-}
-
-type PoolResult<T> = Result<T, PoolError>;
 
 #[derive(PartialEq, Eq, Copy, Clone)]
 enum TaskState {
@@ -49,71 +18,66 @@ enum TaskState {
     Closed,
 }
 
-#[derive(Clone)]
-pub struct PoolTaskEnded<Output: Send + Clone> {
-    pub output: Output,
+/// This struct contains the output of a task, it contains the output itself, the id of the task that have output and a boolean, true if the outputing cleared the pool false otherwise
+pub struct PoolTaskEnded<Output: Send> {
+    pub output: Arc<Output>,
     pub id: OpId,
     pub has_cleared: bool,
 }
 
-/// This is an implementation of a generic process pool . The pool can create processes
-/// and send messages to the spawned processes. It also tracks the state of each process
-/// and provides a sender for easily communicating messages through a Tokio channel.
-///
-/// As a generic process pool, it defines a `Task` trait, which includes a `begin` method
-/// that returns a sender for message transmission. Messages are generic, but all processes
-/// within the pool must handle the same message type, even if the processes themselves differ.
-///
-/// Additionally, the pool can externally notify about process creation and termination events.
-/// When a process generates output, it sends the result back to the pool through a sender,
-/// and the pool broadcasts this result to all interested parties.
+pub type OutputSender<Output> = Sender<PoolTaskEnded<Output>>;
+pub type OutputReceiver<Output> = Receiver<PoolTaskEnded<Output>>;
 
-struct WrappedTaskPool<Message: Send, Output: Send + Clone> {
+struct WrappedTaskPool<Message: Send, Output: Send> {
     pool: HashMap<OpId, Sender<Message>>,
-    end_process_sender: Sender<(OpId, Output)>,
-    output_result_senders: Vec<Sender<PoolTaskEnded<Output>>>,
-    process_creation_senders: HashMap<OpId, Vec<Sender<()>>>,
-    process_states: HashMap<OpId, TaskState>,
-    cleaning_notifier: Option<(Sender<()>, usize)>,
+    end_task_sender: Sender<(OpId, Output)>,
+    output_result_senders: Vec<OutputSender<Output>>,
+    task_creation_senders: HashMap<OpId, Vec<Sender<()>>>,
+    task_states: HashMap<OpId, TaskState>,
+    cleaning_notifier: Option<(Sender<()>, Option<usize>)>,
 }
 
-impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
-    WrappedTaskPool<Message, Output>
-{
+impl<Message: Send + 'static, Output: Send + 'static + Sync> WrappedTaskPool<Message, Output> {
     fn new(error_sender: Sender<PoolError>) -> Wrapped<Self> {
-        let (end_process_sender, receiver) = channel(100);
+        let (end_task_sender, receiver) = channel(100);
         let pool = wrap!(WrappedTaskPool {
             pool: HashMap::new(),
-            end_process_sender,
+            end_task_sender,
             output_result_senders: Vec::new(),
-            process_creation_senders: HashMap::new(),
-            process_states: HashMap::new(),
+            task_creation_senders: HashMap::new(),
+            task_states: HashMap::new(),
             cleaning_notifier: None,
         });
-        Self::listen_for_ending_process(pool.clone(), receiver, error_sender);
+        Self::listen_for_ending_task(pool.clone(), receiver, error_sender);
         pool
     }
 
     fn should_clear(&self) -> bool {
-        self.cleaning_notifier.is_some()
-            && self.pool.is_empty()
-            && self.process_states.len() == self.cleaning_notifier.as_ref().unwrap().1
+        if let Some((_, awaited)) = self.cleaning_notifier {
+            let awaited_satisfied = if let Some(awaited) = awaited {
+                self.task_states.len() == awaited
+            } else {
+                true
+            };
+            self.cleaning_notifier.is_some() && self.pool.is_empty() && awaited_satisfied
+        } else {
+            false
+        }
     }
 
-    /// This function takes an id and remove it from the pool. If the pool is in cleaning stage, then the process is totally removed, otherwise his state will pass in Closed
-    /// This function may fail if the process is already over, or if the pool is in cleaning stage with a uninitilised or closed cleaning notifier
-    async fn handle_ending_process(&mut self, ending_process: OpId) -> PoolResult<bool> {
-        if self.process_states.get(&ending_process) != Some(&TaskState::Running) {
-            return Err(PoolError::TaskClosed(ending_process));
+    /// This function takes an id and remove it from the pool. If the pool is in cleaning stage, then the task is totally removed, otherwise his state will pass in Closed
+    /// This function may fail if the task is already over, or if the pool is in cleaning stage with a uninitilised or closed cleaning notifier
+    async fn handle_ending_task(&mut self, ending_task: OpId) -> PoolResult<bool> {
+        if self.task_states.get(&ending_task) != Some(&TaskState::Running) {
+            return Err(PoolError::TaskClosed(ending_task));
         }
-        self.pool.remove(&ending_process);
+        self.pool.remove(&ending_task);
 
-        self.process_states
-            .insert(ending_process, TaskState::Closed);
+        self.task_states.insert(ending_task, TaskState::Closed);
         let should_clear = self.should_clear();
         if should_clear {
-            self.process_states.clear();
-            self.process_creation_senders.clear();
+            self.task_states.clear();
+            self.task_creation_senders.clear();
             let notifier = self.cleaning_notifier.take().unwrap().0; // Can't fail
             if notifier.send(()).await.is_err() {
                 return Err(PoolError::CleaningNotifierError);
@@ -122,36 +86,33 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
         Ok(should_clear)
     }
 
-    /// This function is the main loop of the pool, all the endings processes are received here. If the gestion of an ending process failed, then the erreor is given via the error_sender. If error_sender
+    /// This function is the main loop of the pool, all the endings tasks are received here. If the gestion of an ending task failed, then the erreor is given via the error_sender. If error_sender
     /// isn't valid, then the function simply ignore the errors.
-    fn listen_for_ending_process(
+    fn listen_for_ending_task(
         pool: Wrapped<Self>,
         mut receiver: Receiver<(OpId, Output)>,
         error_sender: Sender<PoolError>,
     ) {
         tokio::spawn(async move {
             loop {
-                let (ending_process, result) = match receiver.recv().await {
+                let (ending_task, result) = match receiver.recv().await {
                     Some(r) => r,
                     None => {
-                        let _ = error_sender.send(PoolError::End).await;
                         return;
                     }
                 };
-                let mut pool = pool.lock().await;
-                match pool.handle_ending_process(ending_process).await {
+                let mut pool = pool.write().await;
+                match pool.handle_ending_task(ending_task).await {
                     Ok(has_cleared) => {
                         let mut senders_to_remove = Vec::new();
+                        let result = Arc::new(result);
                         for (i, sender) in pool.output_result_senders.iter().enumerate() {
-                            if sender
-                                .send(PoolTaskEnded {
-                                    id: ending_process,
-                                    output: result.clone(),
-                                    has_cleared,
-                                })
-                                .await
-                                .is_err()
-                            {
+                            let output = PoolTaskEnded::<Output> {
+                                id: ending_task,
+                                output: Arc::clone(&result),
+                                has_cleared,
+                            };
+                            if sender.send(output).await.is_err() {
                                 senders_to_remove.push(i)
                             }
                         }
@@ -161,49 +122,49 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
                         }
                     }
                     Err(e) => {
-                        let _ = error_sender.send(e).await;
+                        if let Err(e) = error_sender.send(e).await {
+                            error!("Failed to send error: {e:?}");
+                        }
                     }
                 }
             }
         });
     }
 
-    /// This function creates a new process and inserts it into the pool. This process must implement the TaskTrait which allows the pool to start it with a generic argument via the begin function of the TaskTrait. The function may fail if the process is already running, but will not fail if the process was running but is now closed. If the creation of the process identifier was expected by a process_creation_waiter, a notification is sent to the latter. The function returns an error if one of the sender is invalid.
-    async fn new_process<Task: TaskTrait<TaskArg, Message, Output>, TaskArg>(
+    async fn new_task<Task: TaskTrait<TaskArg, Message, Output>, TaskArg>(
         &mut self,
         id: OpId,
-        config: TaskArg,
+        arg: TaskArg,
     ) -> PoolResult<()> {
-        if self.process_states.insert(id, TaskState::Running) == Some(TaskState::Running) {
+        if self.task_states.insert(id, TaskState::Running) == Some(TaskState::Running) {
             return Err(PoolError::TaskAlreadyExists(id));
         }
         let mut result = Ok(());
-        if let Some(senders) = self.process_creation_senders.remove(&id) {
+        if let Some(senders) = self.task_creation_senders.remove(&id) {
             for s in senders {
                 if s.send(()).await.is_err() {
                     result = Err(PoolError::TaskCreationSendingError(id));
                 };
             }
         }
-        let sender = Task::begin(config, self.end_process_sender.clone());
+        let sender = Task::begin(
+            arg,
+            TaskInterface {
+                id,
+                output_sender: self.end_task_sender.clone(),
+            },
+        );
         self.pool.insert(id, sender);
         result
     }
 
-    /// This function waits the creation of a process and send it the generic message passed in argument. The function fail if the process is closed, or if for some reason the communication between thread
-    /// fail.
-    async fn wait_and_send(pool: Wrapped<Self>, id: OpId, msg: Message) -> PoolResult<()> {
+    async fn wait_for_task_creation(pool: &Wrapped<Self>, id: OpId) -> PoolResult<()> {
         let mut receiver = {
-            let mut pool = pool.lock().await;
-            let state = pool.process_states.get(&id);
+            let mut pool = pool.write().await;
+            let state = pool.task_states.get(&id);
             match state {
-                None => pool.new_process_notif_receiver(id),
-                Some(TaskState::Running) => {
-                    return match pool.send(id, msg).await {
-                        Ok(()) => Ok(()),
-                        _ => Err(PoolError::SendError(id)),
-                    }
-                }
+                None => pool.new_task_notif_receiver(id),
+                Some(TaskState::Running) => return Ok(()),
                 Some(TaskState::Closed) => return Err(PoolError::TaskClosed(id)),
             }
         };
@@ -211,6 +172,11 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
             return Err(PoolError::FailedToWaitCreation(id));
         }
         Ok(())
+    }
+
+    async fn wait_and_send(pool: &Wrapped<Self>, id: OpId, msg: Message) -> PoolResult<()> {
+        Self::wait_for_task_creation(pool, id).await?;
+        pool.read().await.send(id, msg).await
     }
 
     async fn send(&self, id: OpId, msg: Message) -> PoolResult<()> {
@@ -225,18 +191,18 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
         }
     }
 
-    fn new_result_redirection(&mut self) -> Receiver<PoolTaskEnded<Output>> {
+    fn new_result_redirection(&mut self) -> OutputReceiver<Output> {
         let (sender, receiver) = channel(100);
         self.output_result_senders.push(sender);
         receiver
     }
 
-    fn new_process_notif_receiver(&mut self, id: OpId) -> Receiver<()> {
+    fn new_task_notif_receiver(&mut self, id: OpId) -> Receiver<()> {
         let (sender, receiver) = channel(100);
-        match self.process_creation_senders.get_mut(&id) {
+        match self.task_creation_senders.get_mut(&id) {
             Some(senders) => senders.push(sender),
             None => {
-                let _ = self.process_creation_senders.insert(id, vec![sender]);
+                let _ = self.task_creation_senders.insert(id, vec![sender]);
             }
         }
         receiver
@@ -246,11 +212,11 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
         self.pool.is_empty()
     }
 
-    async fn clean(&mut self, awaited: usize) -> Option<Receiver<()>> {
+    async fn clean(&mut self, awaited: Option<usize>) -> Option<Receiver<()>> {
         let (sender, receiver) = channel(100);
         if self.pool.is_empty() {
-            self.process_creation_senders.clear();
-            self.process_states.clear();
+            self.task_creation_senders.clear();
+            self.task_states.clear();
             None
         } else {
             self.cleaning_notifier = Some((sender, awaited));
@@ -259,25 +225,34 @@ impl<Message: Send + 'static, Output: Default + Send + 'static + Clone>
     }
 }
 
-pub struct TaskPool<Message: Send, Output: Send + Clone + Default> {
+/// This is an implementation of a generic task pool . The pool can instantiate task
+/// and send messages to the spawned tasks. It also tracks the state of each task
+/// and provides a sender for easily communicating messages through a Tokio channel.
+///
+/// As a generic task pool, it defines a `Task` trait, which includes a `begin` method
+/// that returns a sender for message transmission. Messages are generic, but all tasks
+/// within the pool must handle the same message type, even if the tasks themselves differ.
+///
+/// The pool is also able to wait for the creation of a specifiv task, the g
+///
+/// Additionally, the pool can externally notify about task creation and termination events.
+/// When a task generates output, it sends the result back to the pool through a sender,
+/// and the pool broadcasts this result to all interested parties.
+pub struct TaskPool<Message: Send, Output: Send + Sync> {
     pool: Wrapped<WrappedTaskPool<Message, Output>>,
 }
 
-impl<Message: Send + 'static, Output: Send + 'static + Clone + Default> Default
-    for TaskPool<Message, Output>
-{
+impl<Message: Send + 'static, Output: Send + 'static + Sync> Default for TaskPool<Message, Output> {
     fn default() -> Self {
         let (sender, receiver) = channel(100);
-        default_error_handler(receiver);
+        panic_error_handler(receiver);
         Self {
             pool: WrappedTaskPool::new(sender),
         }
     }
 }
 
-impl<Message: Send + 'static, Output: Send + 'static + Clone + Default> Clone
-    for TaskPool<Message, Output>
-{
+impl<Message: Send + 'static, Output: Send + 'static + Sync> Clone for TaskPool<Message, Output> {
     fn clone(&self) -> Self {
         Self {
             pool: self.pool.clone(),
@@ -285,8 +260,10 @@ impl<Message: Send + 'static, Output: Send + 'static + Clone + Default> Clone
     }
 }
 
-impl<Message: Send + 'static, Output: Send + 'static + Clone + Default> TaskPool<Message, Output> {
-    pub fn new() -> (Self, Receiver<PoolError>) {
+impl<Message: Send + 'static, Output: Send + 'static + Sync> TaskPool<Message, Output> {
+    /// This function creates a pool and return it along with a receiver to handle errors in result reception.
+    /// Note that the pool implements Default, the default implemenation uses panic_error_handler to handle errors
+    pub fn new() -> (Self, ErrorReceiver) {
         let (sender, receiver) = channel(100);
         (
             Self {
@@ -296,43 +273,188 @@ impl<Message: Send + 'static, Output: Send + 'static + Clone + Default> TaskPool
         )
     }
 
-    pub async fn new_process<Task: TaskTrait<TaskArg, Message, Output>, TaskArg>(
+    /// This function creates a new task and inserts it into the pool. This task must implement the TaskTrait which allows the pool to start it with a generic argument via the begin function of the TaskTrait. The function may fail if the task is already running, but will not fail if the task was running but is now closed. If the creation of the task identifier was expected by a task_creation_waiter, a notification is sent to the latter. The function returns an error if one of the sender is invalid.
+    pub async fn new_task<Task: TaskTrait<TaskArg, Message, Output>, TaskArg>(
         &self,
         id: OpId,
         config: TaskArg,
     ) -> PoolResult<()> {
         self.pool
-            .lock()
+            .write()
             .await
-            .new_process::<Task, TaskArg>(id, config)
+            .new_task::<Task, TaskArg>(id, config)
             .await
     }
 
-    pub async fn new_result_redirection(&mut self) -> Receiver<PoolTaskEnded<Output>> {
-        self.pool.lock().await.new_result_redirection()
+    /// This function waits the creation of a task and send it the generic message passed in argument. The function fail if the task is closed or if we fail to receiv the creation notification
+    pub async fn wait_for_task_creation(&self, id: OpId) -> PoolResult<()> {
+        WrappedTaskPool::wait_for_task_creation(&self.pool, id).await
     }
 
+    ///  Returns a receiver of task result, when a task ended the result will be sent through it
+    pub async fn new_result_redirection(&self) -> OutputReceiver<Output> {
+        self.pool.write().await.new_result_redirection()
+    }
+
+    /// Returns true if there is no running process in the pool
     pub async fn is_empty(&self) -> bool {
-        self.pool.lock().await.is_empty()
+        self.pool.read().await.is_empty()
     }
 
+    /// This function waits the creation of a task and send it the generic message passed in argument. The function fail if the waiting fails, or if for some reason the communication between thread fail.
     pub async fn wait_and_send(&self, id: OpId, msg: Message) -> PoolResult<()> {
-        WrappedTaskPool::wait_and_send(self.pool.clone(), id, msg).await
+        WrappedTaskPool::wait_and_send(&self.pool, id, msg).await
     }
 
+    /// This function takes a message and an id and try to send via the task sender the message to the running task. The function may return an error if the task does not exist or is over, or if the sender fail to give the message.
     pub async fn send(&self, id: OpId, msg: Message) -> PoolResult<()> {
-        self.pool.lock().await.send(id, msg).await
+        self.pool.read().await.send(id, msg).await
     }
 
-    pub async fn clean(&self, awaited: usize) -> Option<Receiver<()>> {
-        self.pool.lock().await.clean(awaited).await
+    /// This function put the pool in cleaning phase, the awaited parameter represents the number of process that have to be awaited, if None we simply wait for the pool to be empty. If the pool is already cleaned, then the function returns None directly, otherwise, the function bring the pool in cleaning phase and returns a receiver that will notify when the pool is cleaned
+    pub async fn clean(&self, awaited: Option<usize>) -> Option<Receiver<()>> {
+        self.pool.write().await.clean(awaited).await
     }
 }
 
-pub fn default_error_handler(mut error_receiver: Receiver<PoolError>) {
-    tokio::spawn(async move {
-        if let Some(e) = error_receiver.recv().await {
-            panic!("{e}")
+#[tokio::test]
+async fn test_simple_task_execution() {
+    let (task_pool, _) = TaskPool::<String, String>::new();
+
+    struct EchoTask;
+
+    impl TaskTrait<String, String, String> for EchoTask {
+        fn begin(_: String, task_interface: TaskInterface<String>) -> Sender<String> {
+            let (sender, mut receiver) = channel(1);
+            tokio::spawn(async move {
+                while let Some(input) = receiver.recv().await {
+                    task_interface
+                        .output(format!("Echo: {input}"))
+                        .await
+                        .unwrap();
+                }
+            });
+            sender
         }
-    });
+    }
+
+    let task_id = 1;
+    task_pool
+        .new_task::<EchoTask, _>(task_id, "Hello".to_string())
+        .await
+        .unwrap();
+    task_pool
+        .send(task_id, "Hello again!".to_string())
+        .await
+        .unwrap();
+
+    let mut result_receiver = task_pool.new_result_redirection().await;
+    let result = result_receiver.recv().await.unwrap();
+    assert_eq!(result.output.as_ref(), "Echo: Hello again!");
+}
+
+#[tokio::test]
+async fn test_task_does_not_exist() {
+    let (task_pool, _) = TaskPool::<String, String>::new();
+    let task_id = 999;
+    let result = task_pool.send(task_id, "Invalid task".to_string()).await;
+
+    assert!(matches!(result, Err(PoolError::TaskNotExist(_))));
+}
+
+#[tokio::test]
+async fn test_pool_cleaning() {
+    let (task_pool, _) = TaskPool::<String, String>::new();
+
+    struct DummyTask;
+    impl TaskTrait<(), String, String> for DummyTask {
+        fn begin(_: (), task_interface: TaskInterface<String>) -> Sender<String> {
+            let (sender, _) = channel(1);
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                let _ = task_interface.output("Completed".to_string()).await;
+            });
+            sender
+        }
+    }
+
+    let none_cleaner = task_pool.clean(None).await;
+    assert!(none_cleaner.is_none());
+
+    let awaited = 200;
+    for i in 0..awaited {
+        task_pool.new_task::<DummyTask, _>(i, ()).await.unwrap();
+    }
+
+    let cleaner = task_pool.clean(Some(awaited as usize)).await;
+    assert!(cleaner.is_some());
+    cleaner.unwrap().recv().await;
+
+    let none_cleaner = task_pool.clean(None).await;
+    assert!(none_cleaner.is_none());
+}
+
+#[tokio::test]
+async fn test_send_concurrent_tasks() {
+    let (task_pool, _) = TaskPool::<u64, u64>::new();
+
+    struct IncrementTask;
+    impl TaskTrait<u64, u64, u64> for IncrementTask {
+        fn begin(init_val: u64, task_interface: TaskInterface<u64>) -> Sender<u64> {
+            let (sender, mut receiver) = channel(1);
+            tokio::spawn(async move {
+                while let Some(val) = receiver.recv().await {
+                    task_interface.output(init_val + val).await.unwrap();
+                }
+            });
+            sender
+        }
+    }
+
+    for i in 0..5 {
+        task_pool.new_task::<IncrementTask, _>(i, i).await.unwrap();
+        task_pool.send(i, 10).await.unwrap();
+    }
+
+    let mut result_receiver = task_pool.new_result_redirection().await;
+    for _ in 0..5 {
+        let result = result_receiver.recv().await.unwrap();
+        assert_eq!(result.output.as_ref(), &(result.id + 10));
+    }
+}
+
+#[tokio::test]
+async fn test_wait_and_send_concurrent_tasks() {
+    let (task_pool, _) = TaskPool::<u64, u64>::new();
+
+    struct IncrementTask;
+    impl TaskTrait<u64, u64, u64> for IncrementTask {
+        fn begin(init_val: u64, task_interface: TaskInterface<u64>) -> Sender<u64> {
+            let (sender, mut receiver) = channel(1);
+            tokio::spawn(async move {
+                while let Some(val) = receiver.recv().await {
+                    task_interface.output(init_val + val).await.unwrap();
+                }
+            });
+            sender
+        }
+    }
+
+    for i in 0..5 {
+        let task_pool = task_pool.clone();
+        tokio::spawn(async move { task_pool.wait_and_send(i, 10).await.unwrap() });
+    }
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+    for i in 0..5 {
+        task_pool.new_task::<IncrementTask, _>(i, i).await.unwrap();
+    }
+
+    let mut result_receiver = task_pool.new_result_redirection().await;
+
+    for _ in 0..5 {
+        let result = result_receiver.recv().await.unwrap();
+        assert_eq!(result.output.as_ref(), &(result.id + 10));
+    }
 }
