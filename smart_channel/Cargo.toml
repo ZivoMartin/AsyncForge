@@ -1,0 +1,16 @@
+[package]
+name = "smart_channel"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A simple cannal subscribtion system"
+repository = "https://github.com/ZivoMartin/AsyncForge/tree/main/net_pulse"
+homepage = "https://github.com/ZivoMartin/AsyncForge/tree/main/net_pulse"
+readme = "README.md"
+keywords = ["async", "channel", "signal", "clone", "multicast"]
+categories = ["asynchronous", "concurrency", "data-structures"]
+
+
+[dependencies]
+thiserror = "2.0.9"
+tokio = { version = "1.37.0", features = ["full"] }
