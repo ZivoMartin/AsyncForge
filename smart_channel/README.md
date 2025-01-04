@@ -19,7 +19,7 @@
 Add the following line to your Cargo.toml:
 ```toml
 [dependencies]
-multi_channel = "0.1.0"
+smart_channel = "0.1.0"
 ```
 
 ## **Usage**
