@@ -55,7 +55,7 @@ async fn main() {
 }
 ```
 
-## **Exemple 3: Multiple Channels with Differents IDs
+## **Exemple 3: Multiple Channels with Differents IDs**
 
 ```rust
 use smart_channel::{channel, ConnectionId};
