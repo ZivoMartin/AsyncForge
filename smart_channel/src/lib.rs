@@ -9,9 +9,9 @@
 //! ```rust
 //! #[tokio::main]
 //! async fn main() {
-//!     use smart_channel::{channel, ConnectionId};
+//!     use smart_channel::channel;
 //!
-//!     let id = ConnectionId { id: 1 };
+//!     let id = 1;
 //!     let (sender, mut receiver) = channel::<String, _>(100, id);
 //!
 //!     tokio::spawn(async move {
@@ -26,6 +26,6 @@
 //! - Bind `Sender` and `Receiver` using an ID for stronger logical coupling.
 //! - Provides methods like `is_binded_with` to check relationships between channels.
 
-pub mod channels;
+mod channels;
 
-pub use channels::{bind, channel, ConnectionId, Receiver, Sender};
+pub use channels::{bind, channel, Receiver, Sender};

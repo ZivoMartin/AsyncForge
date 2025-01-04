@@ -4,32 +4,23 @@ use tokio::sync::mpsc::{
     channel as tokio_channel, Receiver as TokioReceiver, Sender as TokioSender,
 };
 
-/// Represents a generic relationship between a receiver and multiple senders.
-/// The library does not enforce unique IDs or provide automatic ID generation.
-/// The ID must implement `Eq` and `PartialEq` to be compared with other IDs of the same type
-/// and must also implement `Clone` so it can be cloned when the sender is cloned.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ConnectionId<UniqueId: Clone + Eq + PartialEq> {
-    pub id: UniqueId,
-}
-
 /// Creates a Tokio channel (`tokio::sync::mpsc::channel`) and associates it with the provided ID.
 pub fn channel<T, Id: Clone + Eq + PartialEq>(
     channel_size: usize,
-    id: ConnectionId<Id>,
+    id: Id,
 ) -> (Sender<T, Id>, Receiver<T, Id>) {
     let (sender, receiver) = tokio_channel(channel_size);
     bind(sender, receiver, id)
 }
 
 /// Wraps the given sender and receiver with the provided ID.
-/// This function ensures that calling `is_binded_with` on the returned sender with the returned receiver
+/// This function ensures that calling `is_bound_to` on the returned sender with the returned receiver
 /// will return `true` and vice-versa.
 /// However, it does not guarantee that the Tokio channels are correctly connected.
 pub fn bind<T, Id: Clone + Eq + PartialEq>(
     sender: TokioSender<T>,
     receiver: TokioReceiver<T>,
-    id: ConnectionId<Id>,
+    id: Id,
 ) -> (Sender<T, Id>, Receiver<T, Id>) {
     (Sender::new(sender, id.clone()), Receiver::new(receiver, id))
 }
@@ -38,7 +29,7 @@ pub fn bind<T, Id: Clone + Eq + PartialEq>(
 /// Multiple senders can share the same ID if they are cloned or created using `channel` or `bind` with the same ID.
 #[derive(Debug, Clone)]
 pub struct Sender<T, Id: Clone + Eq + PartialEq> {
-    id: ConnectionId<Id>,
+    id: Id,
     sender: TokioSender<T>,
 }
 
@@ -54,40 +45,40 @@ impl<T, Id: Clone + Eq + PartialEq> Eq for Sender<T, Id> {}
 /// Since receivers are not clonable, each receiver must have its own unique ID unless you manually create another receiver with the same ID.
 #[derive(Debug)]
 pub struct Receiver<T, Id: Clone + Eq + PartialEq> {
-    id: ConnectionId<Id>,
+    id: Id,
     receiver: TokioReceiver<T>,
 }
 
 impl<T, Id: Clone + Eq + PartialEq> Sender<T, Id> {
     /// Private constructor. To create a `Sender`, use `channel`.
-    fn new(sender: TokioSender<T>, id: ConnectionId<Id>) -> Self {
+    fn new(sender: TokioSender<T>, id: Id) -> Self {
         Self { id, sender }
     }
 
     /// Returns a reference to the ID of the `Sender`.
-    pub fn id(&self) -> &ConnectionId<Id> {
+    pub fn id(&self) -> &Id {
         &self.id
     }
 
     /// Returns `true` if `self` is associated with the given `Receiver`, meaning they share the same ID.
-    pub fn is_binded_with(&self, receiver: &Receiver<T, Id>) -> bool {
+    pub fn is_bound_to(&self, receiver: &Receiver<T, Id>) -> bool {
         self.id == receiver.id
     }
 }
 
 impl<T, Id: Clone + Eq + PartialEq> Receiver<T, Id> {
     /// Private constructor. To create a `Receiver`, use `channel`.
-    fn new(receiver: TokioReceiver<T>, id: ConnectionId<Id>) -> Self {
+    fn new(receiver: TokioReceiver<T>, id: Id) -> Self {
         Self { id, receiver }
     }
 
     /// Returns a clone of the ID of the `Receiver`.
-    pub fn id(&self) -> ConnectionId<Id> {
+    pub fn id(&self) -> Id {
         self.id.clone()
     }
 
     /// Returns `true` if `self` is associated with the given `Sender`, meaning they share the same ID.
-    pub fn is_binded_with(&self, sender: &Sender<T, Id>) -> bool {
+    pub fn is_bound_to(&self, sender: &Sender<T, Id>) -> bool {
         self.id == sender.id
     }
 }
@@ -126,18 +117,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_sender_receiver_binding() {
-        let id = ConnectionId { id: 1 };
+        let id = 1;
         let (sender, receiver) = channel::<(), _>(10, id.clone());
 
         assert_eq!(sender.id(), &id);
         assert_eq!(receiver.id(), id);
-        assert!(sender.is_binded_with(&receiver));
-        assert!(receiver.is_binded_with(&sender));
+        assert!(sender.is_bound_to(&receiver));
+        assert!(receiver.is_bound_to(&sender));
     }
 
     #[tokio::test]
     async fn test_send_receive_message() {
-        let id = ConnectionId { id: 2 };
+        let id = 2;
         let (sender, mut receiver) = channel(10, id);
 
         sender.send("Hello, world!".to_string()).await.unwrap();
@@ -148,19 +139,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_unbound_sender_receiver() {
-        let id1 = ConnectionId { id: 1 };
-        let id2 = ConnectionId { id: 2 };
+        let id1 = 1;
+        let id2 = 2;
 
         let (sender, _) = channel::<String, _>(10, id1);
         let (_, receiver) = channel::<String, _>(10, id2);
 
-        assert!(!sender.is_binded_with(&receiver));
-        assert!(!receiver.is_binded_with(&sender));
+        assert!(!sender.is_bound_to(&receiver));
+        assert!(!receiver.is_bound_to(&sender));
     }
 
     #[tokio::test]
     async fn test_multiple_senders_with_same_id() {
-        let id = ConnectionId { id: 1 };
+        let id = 1;
         let (sender1, mut receiver) = channel(10, id.clone());
         let sender2 = sender1.clone();
 
@@ -175,7 +166,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_receiver_closes_on_drop() {
-        let id = ConnectionId { id: 1 };
+        let id = 1;
         let (sender, receiver) = channel::<String, _>(10, id);
 
         drop(receiver);
@@ -186,8 +177,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_duplicate_message_on_same_id() {
-        let id = ConnectionId { id: 4 };
-        let (sender1, mut receiver) = channel(10, id.clone());
+        let id = 4;
+        let (sender1, mut receiver) = channel(10, id);
         let sender2 = sender1.clone();
 
         sender1.send("Message 1".to_string()).await.unwrap();
@@ -201,7 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cloning_sender_does_not_create_new_id() {
-        let id = ConnectionId { id: 42 };
+        let id = 42;
         let (sender1, _) = channel::<String, _>(10, id.clone());
         let sender2 = sender1.clone();
 

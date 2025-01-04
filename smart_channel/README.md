@@ -19,18 +19,18 @@
 Add the following line to your Cargo.toml:
 ```toml
 [dependencies]
-smart_channel = "0.1.0"
+    smart_channel = "0.1.0"
 ```
 
 ## **Usage**
 
 ### Exemple 1: Basic Usage
 ```rust
-use smart_channel::{channel, ConnectionId};
+use smart_channel::channel;
 
 #[tokio::main]
 async fn main() {
-    let id = ConnectionId { id: 1 };
+    let id = 1;
     let (sender, mut receiver) = channel::<String, _>(100, id);
 
     tokio::spawn(async move {
@@ -43,14 +43,14 @@ async fn main() {
 ```
 ### Example 2: Sender and Receiver ID Matching
 ```rust
-use smart_channel::{channel, ConnectionId};
+use smart_channel::channel;
 
 #[tokio::main]
 async fn main() {
-    let id = ConnectionId { id: "channel-1".to_string() };
+    let id = "channel-1".to_string();
     let (sender, receiver) = channel::<i32, _>(100, id.clone());
 
-    assert!(sender.is_binded_with(&receiver));
+    assert!(sender.is_bound_to(&receiver));
     println!("Sender and receiver are bound by ID: {:?}", id.id);
 }
 ```
@@ -58,18 +58,18 @@ async fn main() {
 ## **Exemple 3: Multiple Channels with Differents IDs**
 
 ```rust
-use smart_channel::{channel, ConnectionId};
+use smart_channel::channel;
 
 #[tokio::main]
 async fn main() {
-    let id1 = ConnectionId { id: "channel-1".to_string() };
-    let id2 = ConnectionId { id: "channel-2".to_string() };
+    let id1 = "channel-1".to_string();
+    let id2 = "channel-2".to_string();
 
     let (sender1, receiver1) = channel::<String, _>(100, id1.clone());
     let (sender2, receiver2) = channel::<String, _>(100, id2.clone());
 
-    assert!(sender1.is_binded_with(&receiver1));
-    assert!(!sender1.is_binded_with(&receiver2));  // Different IDs
+    assert!(sender1.is_bound_to(&receiver1));
+    assert!(!sender1.is_bound_to(&receiver2));  // Different IDs
 
     println!("Channel-1: bound correctly");
 }
