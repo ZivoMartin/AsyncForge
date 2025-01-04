@@ -46,7 +46,7 @@ async fn main() {
         println!("Task Output: {}", result.output);
     }
 }
-
+```
 --- 
 
 Other crates are coming soon ! 
