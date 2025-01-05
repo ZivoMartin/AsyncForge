@@ -81,7 +81,7 @@ let mut hub = NotifierHub::new();
 ```
 ### subscribing to channels
 
-```
+```rust
 let receiver = hub.subscribe(&"channel_id");
 ```
 
