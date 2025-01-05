@@ -1,8 +1,7 @@
 [workspace]
 members = [
     "task_forge",
-    #"net_heart",
-    #"net_pulse",
-    "sync_tools"
+    "smart_channel",
+    "notifier_hub",
 ]
 resolver = "2"
