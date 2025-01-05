@@ -30,7 +30,7 @@ Here’s a quick example demonstrating how to use **NotifierHub** to broadcast m
 
 ```rust
 use notifier_hub::{notifier::NotifierHub, writing_handler::Duration};
-
+    
 #[tokio::main]
 async fn main() {
     // Create a new NotifierHub
@@ -69,7 +69,7 @@ async fn main() {
 
 ### Message Types
 
-You can send messages in two ways. You can use the `clone_send` on NotifierHub that will broadcast the given message to all the subscriber by cloning it. Or the arc_send method using a shared reference to broadcast the data among the subscribers without cloning it.
+You can send messages in two ways. You can use the `clone_send` on NotifierHub that will broadcast the given message to all the subscribers by cloning it. Or the arc_send method using a shared reference to broadcast the data among the subscribers without cloning it.
 
 ---
 
