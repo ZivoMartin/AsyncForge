@@ -18,16 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
-name = "asyncforge"
-version = "0.1.0"
-dependencies = [
- "sync_tools",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,6 +102,15 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "notifier_hub"
+version = "0.1.0"
+dependencies = [
+ "smart_channel 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -213,6 +212,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
+name = "smart_channel"
+version = "0.1.1"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
+name = "smart_channel"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a1e5edd9b4d0cf951ea9e1ba769e97dd57a35c497fce70215eb00eb3c87723"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -234,10 +249,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync_tools"
-version = "0.1.0"
+name = "task_forge"
+version = "0.1.1"
 dependencies = [
+ "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
