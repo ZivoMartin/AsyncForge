@@ -8,9 +8,8 @@ use crate::{
 };
 use smart_channel::channel;
 
-// TODO: Create a wrapper behind a mutex for the `DispatchCenter`.
-// TODO: Implement methods for message types that implement `Closable` (should include `shutdown_channel` to close a specific channel and `shutdown_all` to close all channels).
-
+// TODO LATER: Create a wrapper behind a mutex for the `DispatchCenter`.
+// TODO LATER: Implement methods for message types that implement `Closable` (should include `shutdown_channel` to close a specific channel and `shutdown_all` to close all channels).
 // TODO LATER: Implement `Drop` for receivers to enable automatic unsubscription. This requires creating a wrapper containing a shared reference to the `DispatchCenter` to call `unsubscribe`.
 // TODO LATER: Add a wait-for-closing notifier. This should behave similarly to the creation waiters, but for destruction events.
 // TODO LATER: Add the ability to create `WritingHandler` directly from user input.
@@ -43,9 +42,9 @@ pub enum ChannelState {
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct SmartChannelId {
     /// A counter that increments with each created channel to ensure uniqueness.
-    channel_counter: usize,
+    pub(crate) channel_counter: usize,
     /// The memory address of the `DispatchCenter`, stored as a `usize` for simplicity (used as an identifier, not as a dereferenceable address).
-    dispatch_center_address: usize,
+    pub(crate) dispatch_center_address: usize,
 }
 
 pub type MessageSender<M> = Sender<M, SmartChannelId>;
@@ -153,11 +152,10 @@ impl<M, ChannelId> DispatchCenter<Arc<M>, ChannelId>
 where
     M: Send + Sync + 'static,
     ChannelId: Eq + Hash + Clone,
-    for<'a> &'a M: Into<ChannelId>,
 {
     /// Sends an `Arc`-wrapped message to all channels. Cleans inactive receivers before sending.
     /// Useful for broadcasting large messages without cloning the data.
-    pub async fn broadcast_arc(&mut self, msg: M) -> WritingHandler<Arc<M>> {
+    pub fn broadcast_arc(&mut self, msg: M) -> WritingHandler<Arc<M>> {
         self.clean_all();
         let senders: Vec<_> = self
             .senders
@@ -170,11 +168,11 @@ where
     /// Sends a shared reference of the given message to subscribers.
     /// Returns an error if the channel is uninitialised, and an empty handler if it has ended.
     /// Cleans inactive receivers before sending.
-    pub async fn arc_send(
+    pub fn arc_send(
         &mut self,
         msg: M,
+        id: &ChannelId,
     ) -> Result<WritingHandler<Arc<M>>, DispatchError<Arc<M>, ChannelId>> {
-        let id = Into::into(&msg);
         self.clean_channel(&id);
         match self.channel_state(&id) {
             ChannelState::Running => Ok(WritingHandler::new_arc_broadcast(
@@ -182,7 +180,7 @@ where
                 get_senders!(self, id),
             )),
             ChannelState::Over => Ok(WritingHandler::empty()),
-            ChannelState::Uninitialised => Err(DispatchError::ChannelUninitialized(id)),
+            ChannelState::Uninitialised => Err(DispatchError::ChannelUninitialized(id.clone())),
         }
     }
 }
@@ -191,28 +189,9 @@ impl<M, ChannelId> DispatchCenter<M, ChannelId>
 where
     M: Send + Clone + 'static,
     ChannelId: Eq + Hash + Clone,
-    for<'a> &'a M: Into<ChannelId>,
 {
-    /// Sends a cloned value to subscribers. Use this for small, cheap-to-clone messages.
-    /// Cleans inactive receivers before sending.
-    pub async fn clone_send(
-        &mut self,
-        msg: &M,
-    ) -> Result<WritingHandler<M>, DispatchError<M, ChannelId>> {
-        let id = Into::into(msg);
-        self.clean_channel(&id);
-        match self.channel_state(&id) {
-            ChannelState::Running => Ok(WritingHandler::new_cloning_broadcast(
-                msg,
-                get_senders!(self, id),
-            )),
-            ChannelState::Over => Ok(WritingHandler::empty()),
-            ChannelState::Uninitialised => Err(DispatchError::ChannelUninitialized(id)),
-        }
-    }
-
     /// Broadcasts the cloned message to all channels.
-    pub async fn broadcast_clone(&mut self, msg: &M) -> WritingHandler<M> {
+    pub fn broadcast_clone(&mut self, msg: &M) -> WritingHandler<M> {
         self.clean_all();
         let senders: Vec<_> = self
             .senders
@@ -220,6 +199,24 @@ where
             .flat_map(|s| s.iter().cloned())
             .collect();
         WritingHandler::new_cloning_broadcast(&msg, &senders)
+    }
+
+    /// Sends a cloned value to subscribers. Use this for small, cheap-to-clone messages.
+    /// Cleans inactive receivers before sending.
+    pub fn clone_send(
+        &mut self,
+        msg: &M,
+        id: &ChannelId,
+    ) -> Result<WritingHandler<M>, DispatchError<M, ChannelId>> {
+        self.clean_channel(&id);
+        match self.channel_state(&id) {
+            ChannelState::Running => Ok(WritingHandler::new_cloning_broadcast(
+                msg,
+                get_senders!(self, id),
+            )),
+            ChannelState::Over => Ok(WritingHandler::empty()),
+            ChannelState::Uninitialised => Err(DispatchError::ChannelUninitialized(id.clone())),
+        }
     }
 }
 
@@ -263,6 +260,18 @@ impl<M, ChannelId: Eq + Hash + Clone> DispatchCenter<M, ChannelId> {
             .collect()
     }
 
+    /// Unsubscribes from all subscriptions for the given receiver across all channels.
+    /// This function calls `unsubscribe_multiple` using the list returned by `subscribed_list`.
+    /// If the receiver is subscribed to multiple channels, it removes the subscriptions for all of them.
+    /// Returns the list of channel IDs from which the receiver was unsubscribed.
+    pub fn unsubscribe_all(&mut self, receiver: &MessageReceiver<M>) -> Vec<ChannelId> {
+        let sub_list = self.subscribed_list(receiver);
+        if !sub_list.is_empty() {
+            let _ = self.unsubscribe_multiple(&sub_list, receiver); // This should not fail as `subscribed_list` returns only valid channels.
+        }
+        sub_list
+    }
+
     /// This function takes in parameter a receiver, and remove the associated sender in the given channel, it it exists, otherwise it returns an error. Returns the new state of the channel.
     pub fn unsubscribe(
         &mut self,
@@ -284,8 +293,7 @@ impl<M, ChannelId: Eq + Hash + Clone> DispatchCenter<M, ChannelId> {
                     )), // Should never append as we already checked the state
                 }
             }
-            ChannelState::Over => Err(DispatchError::ChannelOver(id.clone())),
-            ChannelState::Uninitialised => Err(DispatchError::ChannelUninitialized(id.clone())),
+            _ => Err(DispatchError::NotSubscribed(id.clone())),
         }
     }
 
@@ -308,7 +316,7 @@ impl<M, ChannelId: Eq + Hash + Clone> DispatchCenter<M, ChannelId> {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(DispatchError::NotSubscribeMultiple(errors))
+            Err(DispatchError::NotSubscribedMultiple(errors))
         }
     }
 
@@ -365,5 +373,350 @@ impl<M: Clone, ChannelId: Eq + Hash + Clone> DispatchCenter<M, ChannelId> {
                     .map(|sender| (id.clone(), sender))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dispatch_center::ChannelState;
+    use smart_channel::channel;
+
+    #[tokio::test]
+    async fn test_empty_dispatch_center() {
+        let center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+
+        assert_eq!(
+            center.channel_state(&"channel1"),
+            ChannelState::Uninitialised
+        );
+        assert_eq!(center.channel_number_subscriber(&"channel1"), 0);
+        assert_eq!(center.number_of_waiter(&"channel1"), 0);
+    }
+
+    #[tokio::test]
+    async fn test_unique_channel_ids() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let id1 = center.get_new_id();
+        let id2 = center.get_new_id();
+        let id3 = center.get_new_id();
+        assert_ne!(id1, id2);
+        assert_ne!(id1, id3);
+        assert_ne!(id2, id3);
+    }
+
+    #[tokio::test]
+    async fn test_is_subscribed() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (sender, receiver) = channel(10, center.get_new_id());
+
+        center.senders.insert("channel1", vec![sender.clone()]);
+        assert!(center.is_subscribed(&"channel1", &receiver));
+    }
+
+    #[tokio::test]
+    async fn test_channel_number_subscriber() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (sender1, _receiver1) = channel(10, center.get_new_id());
+        let (sender2, _receiver2) = channel(10, center.get_new_id());
+
+        center.senders.insert("channel1", vec![sender1, sender2]);
+        assert_eq!(center.channel_number_subscriber(&"channel1"), 2);
+    }
+
+    #[tokio::test]
+    async fn test_notify_creation() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (waiter_sender, mut waiter_receiver) = channel(10, center.get_new_id());
+
+        center
+            .waiter_senders
+            .insert("channel1", vec![waiter_sender]);
+        let handler = center.notify_creation(&"channel1");
+        let result = handler.wait(None).await;
+
+        assert!(result.is_ok());
+        assert!(waiter_receiver.recv().await.is_some()); // Ensure notification was sent.
+    }
+
+    #[tokio::test]
+    async fn test_number_of_waiter() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (waiter1, _) = channel(10, center.get_new_id());
+        let (waiter2, _) = channel(10, center.get_new_id());
+
+        center
+            .waiter_senders
+            .insert("channel1", vec![waiter1, waiter2]);
+        assert_eq!(center.number_of_waiter(&"channel1"), 2);
+    }
+
+    #[tokio::test]
+    async fn test_channel_state_transitions() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+
+        assert_eq!(
+            center.channel_state(&"channel1"),
+            ChannelState::Uninitialised
+        );
+
+        let (sender, _receiver) = channel(10, center.get_new_id());
+        center.senders.insert("channel1", vec![sender]);
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Running);
+
+        center.clean_channel(&"channel1"); // No receivers closed.
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Running);
+
+        center.senders.get_mut("channel1").unwrap().clear(); // Clear all senders.
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Over);
+    }
+
+    #[tokio::test]
+    async fn test_clean_channel() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (sender, _) = channel(10, center.get_new_id());
+
+        center.senders.insert("channel1", vec![sender]);
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Running);
+
+        center.clean_channel(&"channel1"); // Clean closed connections.
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Over); // No active senders remain.
+    }
+
+    #[tokio::test]
+    async fn test_clean_all() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let (sender1, _) = channel(10, center.get_new_id());
+        let (sender2, _receiver2) = channel(10, center.get_new_id());
+
+        center.senders.insert("channel1", vec![sender1.clone()]);
+        center.senders.insert("channel2", vec![sender2.clone()]);
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Running);
+        assert_eq!(center.channel_state(&"channel2"), ChannelState::Running);
+
+        let cleaned_states = center.clean_all();
+        assert_eq!(cleaned_states.get(&"channel1"), Some(&ChannelState::Over));
+        assert_eq!(
+            cleaned_states.get(&"channel2"),
+            Some(&ChannelState::Running)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subscribe() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+
+        let (waiter, mut wait_receiver) = channel(10, center.get_new_id());
+
+        center.waiter_senders.insert("channel1", vec![waiter]);
+
+        let receiver = center.subscribe(&"channel1");
+
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Running);
+        assert!(center.is_subscribed(&"channel1", &receiver));
+        assert!(center.channel_number_subscriber(&"channel1") == 1);
+        assert!(wait_receiver.recv().await == Some(()))
+    }
+
+    #[tokio::test]
+    async fn test_subscribed_list() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+        center.subscribe(&"channel2");
+
+        let subscribed_channels = center.subscribed_list(&receiver);
+        assert!(subscribed_channels == vec!("channel1"));
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+
+        let result = center.unsubscribe(&"channel1", &receiver);
+        assert!(result.is_ok());
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Over);
+
+        let invalid_result = center.unsubscribe(&"channel1", &receiver);
+        assert!(matches!(
+            invalid_result,
+            Err(DispatchError::NotSubscribed("channel1"))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe_multiple() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+        center.subscribe(&"channel2");
+
+        let result = center.unsubscribe_multiple(&["channel1", "channel2"], &receiver);
+        match result {
+            Ok(()) => panic!(),
+            Err(DispatchError::NotSubscribedMultiple(errors)) => assert!(
+                errors.len() == 1 && matches!(errors[0], DispatchError::NotSubscribed("channel2"))
+            ),
+            _ => panic!("Unexpected error"),
+        }
+
+        assert!(!center.is_subscribed(&"channel1", &receiver));
+        assert_eq!(center.channel_state(&"channel1"), ChannelState::Over);
+        assert_eq!(center.channel_state(&"channel2"), ChannelState::Running);
+    }
+
+    #[tokio::test]
+    async fn test_get_waiter() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let mut waiter = center.get_waiter(&"channel1");
+
+        let _ = center.subscribe(&"channel1");
+        assert!(waiter.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_multiple() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe_multiple(&["channel1", "channel2"]);
+
+        assert!(center.is_subscribed(&"channel1", &receiver));
+        assert!(center.is_subscribed(&"channel2", &receiver));
+    }
+
+    #[tokio::test]
+    async fn test_get_sender() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+
+        let sender = center.get_sender(&"channel1", &receiver);
+        assert!(sender.is_some());
+
+        let nonexistent_sender = center.get_sender(&"channel2", &receiver);
+        assert!(nonexistent_sender.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_senders() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe_multiple(&["channel1", "channel2"]);
+
+        let senders = center.get_senders(&receiver, &["channel1", "channel2"]);
+        assert_eq!(senders.len(), 2);
+        assert!(senders.contains_key(&"channel1"));
+        assert!(senders.contains_key(&"channel2"));
+
+        let empty_senders = center.get_senders(&receiver, &["channel3", "channel1"]);
+        assert!(empty_senders.len() == 1);
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe_all_multiple_channels() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let _receiver1 = center.subscribe(&"channel1");
+        let _receiver2 = center.subscribe(&"channel2");
+        let _receiver3 = center.subscribe(&"channel3");
+
+        let receiver = center.subscribe_multiple(&["channel1", "channel2", "channel3"]);
+
+        let unsubscribed_channels = center.unsubscribe_all(&receiver);
+        assert_eq!(unsubscribed_channels.len(), 3);
+        assert!(!center.is_subscribed(&"channel1", &receiver));
+        assert!(!center.is_subscribed(&"channel2", &receiver));
+        assert!(!center.is_subscribed(&"channel3", &receiver));
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_arc() {
+        let mut center: DispatchCenter<Arc<String>, &'static str> = DispatchCenter::new();
+        let receiver1 = center.subscribe_multiple(&["channel1", &"channel2"]);
+        let _receiver2 = center.subscribe(&"channel3");
+
+        let msg = "Hello ARC broadcast!".to_string();
+        let handler = center.broadcast_arc(msg.clone());
+
+        assert_eq!(handler.len(), 3);
+
+        center.unsubscribe_all(&receiver1);
+
+        let handler_after_drop = center.broadcast_arc(msg.clone());
+        assert_eq!(handler_after_drop.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_arc_send() {
+        let mut center: DispatchCenter<Arc<String>, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+
+        let msg = "Hello ARC send!".to_string();
+        let handlers = center.arc_send(msg, &"channel1").unwrap();
+        assert_eq!(handlers.len(), 1);
+
+        // Test uninitialised channel
+        let uninitialised_result =
+            center.arc_send("Message to no channel".to_string(), &"channel2");
+
+        assert!(matches!(
+            uninitialised_result,
+            Err(DispatchError::ChannelUninitialized("channel2"))
+        ));
+
+        center.unsubscribe(&"channel1", &receiver).unwrap();
+
+        // Close the channel and test
+        center.clean_channel(&"channel1");
+        let closed_result = center.arc_send("Message to nobody".to_string(), &"channel1");
+        assert_eq!(closed_result.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_clone_send() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let receiver = center.subscribe(&"channel1");
+
+        let msg = "Clone send message".to_string();
+        let result = center.clone_send(&msg, &"channel1");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 1);
+
+        // Test uninitialised channel
+        let uninitialised_result = center.clone_send(&"No such channel".to_string(), &"channel2");
+        assert!(matches!(
+            uninitialised_result,
+            Err(DispatchError::ChannelUninitialized("channel2"))
+        ));
+
+        center.unsubscribe(&"channel1", &receiver).unwrap();
+
+        // Test closed channel
+        center.clean_channel(&"channel1");
+        let closed_result = center.clone_send(&msg, &"channel1");
+        assert_eq!(closed_result.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_clone() {
+        let mut center: DispatchCenter<String, &'static str> = DispatchCenter::new();
+        let mut receiver1 = center.subscribe(&"channel1");
+        let mut receiver2 = center.subscribe(&"channel2");
+
+        let msg = "Clone broadcast message".to_string();
+        let handler = center.broadcast_clone(&msg);
+        assert_eq!(handler.len(), 2); // Two channels
+
+        assert_eq!(
+            receiver1.recv().await.unwrap(),
+            "Clone broadcast message".to_string()
+        );
+
+        assert_eq!(
+            receiver2.recv().await.unwrap(),
+            "Clone broadcast message".to_string()
+        );
+
+        // Drop receivers and broadcast again
+        drop(receiver1);
+        drop(receiver2);
+
+        let handler_after_drop = center.broadcast_clone(&msg);
+        assert_eq!(handler_after_drop.len(), 0); // No active receivers
     }
 }

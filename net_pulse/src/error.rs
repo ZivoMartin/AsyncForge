@@ -23,7 +23,7 @@ pub enum DispatchError<M, ChannelId> {
     #[error("The given receiver is no subscribed to the channel {0:?}")]
     NotSubscribed(ChannelId),
     #[error("The given receiver is no subscribed to this channels: {0:?}")]
-    NotSubscribeMultiple(Vec<DispatchError<M, ChannelId>>),
+    NotSubscribedMultiple(Vec<DispatchError<M, ChannelId>>),
     #[error("The channel {0:?} has not been initialized")]
     ChannelUninitialized(ChannelId),
     #[error("The channel {0:?} is over")]
