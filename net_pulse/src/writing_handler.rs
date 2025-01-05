@@ -7,7 +7,7 @@ use tokio::{
 };
 
 use crate::{
-    dispatch_center::{MessageSender, SmartChannelId},
+    dispatch_center::SmartChannelId,
     error::{DispatchError, UnexpectedErrorKind},
     Sender,
 };
@@ -19,7 +19,7 @@ type Handler<M> = JoinHandle<Result<(), SendError<M>>>;
 /// It allows for broadcasting messages to multiple senders and waiting for all tasks to complete.
 /// You can either broadcast a message behind an `Arc` (for efficiency) or clone the message.
 #[derive(Default)]
-pub(crate) struct WritingHandler<M: Send + 'static> {
+pub struct WritingHandler<M: Send + 'static> {
     handlers: Vec<Handler<M>>,
 }
 
@@ -31,7 +31,7 @@ impl<M: Send + 'static + Sync> WritingHandler<Arc<M>> {
     /// Creates a `WritingHandler` for broadcasting messages across multiple senders using `Arc<M>`.
     /// This avoids cloning the message for each sender but requires `M` to implement `Sync`.
     /// This approach is efficient for large messages.
-    pub(crate) fn new_arc_broadcast(msg: M, senders: &[MessageSender<M>]) -> Self {
+    pub(crate) fn new_arc_broadcast(msg: M, senders: &[Sender<Arc<M>, SmartChannelId>]) -> Self {
         let msg = Arc::new(msg);
         WritingHandler {
             handlers: senders
@@ -48,7 +48,7 @@ impl<M: Send + 'static + Sync> WritingHandler<Arc<M>> {
 impl<M: Send + 'static + Clone> WritingHandler<M> {
     /// Creates a `WritingHandler` by cloning the message for each sender.
     /// This is useful when sending simple notification messages.
-    pub(crate) fn new_cloning_broadcast(msg: M, senders: &[Sender<M, SmartChannelId>]) -> Self {
+    pub(crate) fn new_cloning_broadcast(msg: &M, senders: &[Sender<M, SmartChannelId>]) -> Self {
         WritingHandler {
             handlers: senders
                 .iter()
@@ -75,7 +75,8 @@ impl<M: Send + 'static> WritingHandler<M> {
     /// If `duration` is `None`, this method waits indefinitely.
     /// If `duration` is `Some`, it waits only for the given time.
     /// Returns the number of completed tasks on success or a vector of caught errors.
-    pub async fn wait(self, duration: Option<Duration>) -> Result<usize, DispatchError<M>> {
+    /// Note that here the second generic type is unit as we are not using it anyway in the returned errors.
+    pub async fn wait(self, duration: Option<Duration>) -> Result<usize, DispatchError<M, ()>> {
         let n = self.handlers.len();
         let mut errors = Vec::new();
 

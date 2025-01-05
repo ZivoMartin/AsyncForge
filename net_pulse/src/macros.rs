@@ -2,6 +2,6 @@
 #[macro_export]
 macro_rules! get_senders {
     ($center:expr, $id:expr) => {
-        $center.senders.get($id).unwrap_or(&Vec::new())
+        $center.senders.get(&$id).unwrap_or(&Vec::new())
     };
 }
