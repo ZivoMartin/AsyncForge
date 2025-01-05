@@ -696,13 +696,6 @@ mod tests {
         let msg = "Message !".to_string();
         let handler = hub.clone_send(&msg, &"channel1").unwrap();
         handler.wait(None).await.unwrap();
-        // let mut hub = NotifierHub::new();
-        // let receiver = hub.subscribe(&"channel1");
-
-        // let msg = "Clone send message".to_string();
-        // let result = hub.clone_send(&msg, &"channel1");
-        // assert!(result.is_ok());
-        // assert_eq!(result.unwrap().len(), 1);
 
         // Test uninitialised channel
         let uninitialised_result = hub.clone_send(&"No such channel".to_string(), &"channel2");
