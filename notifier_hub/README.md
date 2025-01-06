@@ -116,7 +116,7 @@ match hub.channel_state(&"channel_id") {
 ### Creation Waiters
 You can register waiters to be notified when new subscribers join a channel:
 ```rust
-let mut creation_waiter = hub.get_waiter(&"channel1");
+let mut creation_waiter = hub.get_creation_waiter(&"channel1");
 let _receiver = hub.subscribe(&"channel1");
 assert!(creation_waiter.recv().await.is_some());
 ```
