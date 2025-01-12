@@ -1,5 +1,9 @@
 # **AsyncForge**
 
+# **Notice**
+
+The source code has been migrated to a dedicated GitHub account. This repository only contains archived versions. The latest version can be found [here](https://github.com/AsyncForge).
+
 **AsyncForge** is a powerful and modular toolkit for managing asynchronous tasks in **Rust**, built on top of **Tokio**. It provides a suite of crates that simplify asynchronous programming through customizable tools, procedural macros, and robust communication mechanisms.
 
 ---
