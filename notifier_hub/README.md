@@ -1,3 +1,8 @@
+# **Notice**
+
+The source code has been migrated to a dedicated GitHub account. This repository only contains archived versions. The latest version can be found [here](https://github.com/AsyncForge/NotifierHub).
+
+
 # NotifierHub
 
 A **Rust crate** providing an efficient and asynchronous notification system for broadcasting messages to multiple subscribers. **NotifierHub** is designed for scenarios that require high performance and concurrent message broadcasting, ensuring non-blocking sends and the ability to wait for completion with timeouts if desired.

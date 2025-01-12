@@ -1,3 +1,7 @@
+# **Notice**
+
+The source code has been migrated to a dedicated GitHub account. This repository only contains archived versions. The latest version can be found [here](https://github.com/AsyncForge/TaskForge).
+
 # Task Forge
 
 A flexible and asynchronous task forge for concurrent task execution in Rust. `Task Forge` allows you to spawn tasks, send messages, and handle task outputs efficiently using Tokio channels.

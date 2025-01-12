@@ -1,3 +1,8 @@
+# **Notice**
+
+The source code has been migrated to a dedicated GitHub account. This repository only contains archived versions. The latest version can be found [here](https://github.com/AsyncForge/SmartChannel).
+
+
 # SmartChannel
 
 **SmartChannel** is a Rust library built on top of Tokio that enhances the capabilities of the standard Tokio sender/receiver channels by providing additional features such as ID-based sender/receiver pairs.
